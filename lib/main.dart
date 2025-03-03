@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(const CocktailApp());
@@ -32,88 +34,192 @@ class CocktailApp extends StatelessWidget {
   }
 }
 
-class CocktailHomePage extends StatelessWidget {
+class CocktailHomePage extends StatefulWidget {
   const CocktailHomePage({Key? key}) : super(key: key);
+
+  @override
+  State<CocktailHomePage> createState() => _CocktailHomePageState();
+}
+
+class _CocktailHomePageState extends State<CocktailHomePage> {
+  List<Cocktail> popularCocktails = [];
+  Cocktail? featuredCocktail;
+  bool isLoading = true;
+  String? errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchCocktails();
+  }
+
+  Future<void> fetchCocktails() async {
+    try {
+      setState(() {
+        isLoading = true;
+        errorMessage = null;
+      });
+
+      // Lade beliebte Cocktails (alphabetisch geordnet)
+      final popularResponse = await http.get(
+        Uri.parse(
+            'https://www.thecocktaildb.com/api/json/v1/1/filter.php?c=Cocktail'),
+      );
+
+      if (popularResponse.statusCode != 200) {
+        throw Exception(
+            'Fehler beim Laden der Cocktails: ${popularResponse.statusCode}');
+      }
+
+      final popularData = json.decode(popularResponse.body);
+      final cocktailList = popularData['drinks'] as List;
+
+      // Lade Details für jeden Cocktail
+      List<Cocktail> fullCocktails = [];
+
+      // Begrenze auf maximal 10 Cocktails für bessere Performance
+      final limitedList = cocktailList.take(10).toList();
+
+      for (var item in limitedList) {
+        final detailResponse = await http.get(
+          Uri.parse(
+              'https://www.thecocktaildb.com/api/json/v1/1/lookup.php?i=${item['idDrink']}'),
+        );
+
+        if (detailResponse.statusCode == 200) {
+          final detailData = json.decode(detailResponse.body);
+          final drinkData = detailData['drinks'][0];
+
+          fullCocktails.add(Cocktail.fromJson(drinkData));
+        }
+      }
+
+      // Lade einen zufälligen Cocktail als "Cocktail des Tages"
+      final randomResponse = await http.get(
+        Uri.parse('https://www.thecocktaildb.com/api/json/v1/1/random.php'),
+      );
+
+      if (randomResponse.statusCode == 200) {
+        final randomData = json.decode(randomResponse.body);
+        final featuredData = randomData['drinks'][0];
+
+        setState(() {
+          popularCocktails = fullCocktails;
+          featuredCocktail = Cocktail.fromJson(featuredData);
+          isLoading = false;
+        });
+      } else {
+        throw Exception('Fehler beim Laden des Cocktail des Tages');
+      }
+    } catch (e) {
+      setState(() {
+        errorMessage = 'Fehler beim Laden der Daten: $e';
+        isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 200.0,
-            floating: false,
-            pinned: true,
-            flexibleSpace: FlexibleSpaceBar(
-              title: const Text(
-                'Cocktail Paradise',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  shadows: [
-                    Shadow(
-                      blurRadius: 10.0,
-                      color: Colors.black45,
-                      offset: Offset(2.0, 2.0),
-                    ),
-                  ],
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator(color: Colors.amber))
+          : errorMessage != null
+              ? Center(
+                  child: Text(errorMessage!,
+                      style: Theme.of(context).textTheme.titleLarge))
+              : RefreshIndicator(
+                  onRefresh: fetchCocktails,
+                  color: Colors.amber,
+                  child: CustomScrollView(
+                    slivers: [
+                      SliverAppBar(
+                        expandedHeight: 200.0,
+                        floating: false,
+                        pinned: true,
+                        actions: [
+                          IconButton(
+                            icon: const Icon(Icons.refresh),
+                            onPressed: fetchCocktails,
+                          ),
+                        ],
+                        flexibleSpace: FlexibleSpaceBar(
+                          title: const Text(
+                            'Cocktail Paradise',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              shadows: [
+                                Shadow(
+                                  blurRadius: 10.0,
+                                  color: Colors.black45,
+                                  offset: Offset(2.0, 2.0),
+                                ),
+                              ],
+                            ),
+                          ),
+                          background: Image.network(
+                            'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80',
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                      SliverPadding(
+                        padding: const EdgeInsets.all(16.0),
+                        sliver: SliverToBoxAdapter(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Beliebte Cocktails',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineMedium),
+                              const SizedBox(height: 16.0),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        sliver: SliverGrid(
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            mainAxisSpacing: 16.0,
+                            crossAxisSpacing: 16.0,
+                            childAspectRatio: 0.75,
+                          ),
+                          delegate: SliverChildBuilderDelegate(
+                            (BuildContext context, int index) {
+                              return CocktailCard(
+                                  cocktail: popularCocktails[index]);
+                            },
+                            childCount: popularCocktails.length,
+                          ),
+                        ),
+                      ),
+                      if (featuredCocktail != null)
+                        SliverPadding(
+                          padding: const EdgeInsets.all(16.0),
+                          sliver: SliverToBoxAdapter(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 24.0),
+                                Text('Cocktail des Tages',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .headlineMedium),
+                                const SizedBox(height: 16.0),
+                                FeaturedCocktailCard(
+                                    cocktail: featuredCocktail!),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              background: Image.network(
-                'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80',
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.all(16.0),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Beliebte Cocktails',
-                      style: Theme.of(context).textTheme.headlineMedium),
-                  const SizedBox(height: 16.0),
-                ],
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 16.0,
-                crossAxisSpacing: 16.0,
-                childAspectRatio: 0.75,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (BuildContext context, int index) {
-                  return CocktailCard(
-                      cocktail:
-                          sampleCocktails[index % sampleCocktails.length]);
-                },
-                childCount: sampleCocktails.length,
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.all(16.0),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 24.0),
-                  Text('Cocktail des Tages',
-                      style: Theme.of(context).textTheme.headlineMedium),
-                  const SizedBox(height: 16.0),
-                  FeaturedCocktailCard(cocktail: sampleCocktails[0]),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
       bottomNavigationBar: BottomNavigationBar(
         selectedItemColor: Colors.amber,
         unselectedItemColor: Colors.grey,
@@ -137,21 +243,68 @@ class CocktailHomePage extends StatelessWidget {
 }
 
 class Cocktail {
+  final String id;
   final String name;
   final String imageUrl;
   final String description;
   final List<String> ingredients;
   final String preparation;
   final double rating;
+  final String category;
+  final String alcoholic;
+  final String glassType;
 
   Cocktail({
+    required this.id,
     required this.name,
     required this.imageUrl,
     required this.description,
     required this.ingredients,
     required this.preparation,
     required this.rating,
+    required this.category,
+    required this.alcoholic,
+    required this.glassType,
   });
+
+  factory Cocktail.fromJson(Map<String, dynamic> json) {
+    // Sammle alle Zutaten (nicht null)
+    List<String> ingredientsList = [];
+    for (int i = 1; i <= 15; i++) {
+      final ingredient = json['strIngredient$i'];
+      final measure = json['strMeasure$i'];
+
+      if (ingredient != null && ingredient.toString().trim().isNotEmpty) {
+        if (measure != null && measure.toString().trim().isNotEmpty) {
+          ingredientsList.add('$measure $ingredient');
+        } else {
+          ingredientsList.add(ingredient);
+        }
+      }
+    }
+
+    // Erzeuge eine zufällige Bewertung zwischen 3.8 und 5.0
+    final rating =
+        3.8 + (1.2 * (DateTime.now().millisecondsSinceEpoch % 100) / 100);
+
+    return Cocktail(
+      id: json['idDrink'] ?? '',
+      name: json['strDrink'] ?? 'Unbekannter Cocktail',
+      imageUrl: json['strDrinkThumb'] ??
+          'https://www.thecocktaildb.com/images/media/drink/vrwquq1478252802.jpg',
+      description: json['strInstructions'] ??
+          json['strInstructionsDE'] ??
+          'Keine Beschreibung verfügbar.',
+      ingredients: ingredientsList,
+      preparation: json['strInstructions'] ??
+          json['strInstructionsDE'] ??
+          'Keine Zubereitungsanleitung verfügbar.',
+      rating: rating,
+      category: json['strCategory'] ?? 'Cocktail',
+      alcoholic: json['strAlcoholic'] ?? 'Unbekannt',
+      glassType: json['strGlass'] ?? 'Cocktailglas',
+    );
+  }
 }
 
 class CocktailCard extends StatelessWidget {
@@ -182,11 +335,17 @@ class CocktailCard extends StatelessWidget {
             Expanded(
               flex: 3,
               child: Hero(
-                tag: 'cocktail-image-${cocktail.name}',
+                tag: 'cocktail-image-${cocktail.id}',
                 child: Image.network(
                   cocktail.imageUrl,
                   fit: BoxFit.cover,
                   width: double.infinity,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      color: Colors.grey.shade300,
+                      child: const Icon(Icons.error, color: Colors.red),
+                    );
+                  },
                 ),
               ),
             ),
@@ -217,9 +376,15 @@ class CocktailCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4.0),
                     Text(
-                      cocktail.description,
+                      cocktail.category,
                       style: Theme.of(context).textTheme.bodyLarge,
-                      maxLines: 2,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      cocktail.alcoholic,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
@@ -266,10 +431,16 @@ class FeaturedCocktailCard extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   Hero(
-                    tag: 'featured-${cocktail.name}',
+                    tag: 'featured-${cocktail.id}',
                     child: Image.network(
                       cocktail.imageUrl,
                       fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          color: Colors.grey.shade300,
+                          child: const Icon(Icons.error, color: Colors.red),
+                        );
+                      },
                     ),
                   ),
                   Container(
@@ -324,7 +495,7 @@ class FeaturedCocktailCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Beschreibung',
+                    'Kategorie: ${cocktail.category}',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8.0),
@@ -333,9 +504,22 @@ class FeaturedCocktailCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                   const SizedBox(height: 16.0),
-                  Text(
-                    'Probier ihn noch heute!',
-                    style: Theme.of(context).textTheme.titleLarge,
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              CocktailDetailPage(cocktail: cocktail),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.local_bar),
+                    label: const Text('Probier ihn noch heute!'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amber,
+                      foregroundColor: Colors.white,
+                    ),
                   ),
                 ],
               ),
@@ -378,10 +562,17 @@ class CocktailDetailPage extends StatelessWidget {
                 ),
               ),
               background: Hero(
-                tag: 'cocktail-image-${cocktail.name}',
+                tag: 'cocktail-image-${cocktail.id}',
                 child: Image.network(
                   cocktail.imageUrl,
                   fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      color: Colors.grey.shade300,
+                      child:
+                          const Icon(Icons.error, color: Colors.red, size: 50),
+                    );
+                  },
                 ),
               ),
             ),
@@ -393,6 +584,33 @@ class CocktailDetailPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Kategorie und Info
+                    Wrap(
+                      spacing: 8.0,
+                      children: [
+                        Chip(
+                          label: Text(cocktail.category),
+                          backgroundColor: Colors.amber.shade100,
+                          avatar:
+                              const Icon(Icons.category, color: Colors.amber),
+                        ),
+                        Chip(
+                          label: Text(cocktail.alcoholic),
+                          backgroundColor: Colors.amber.shade100,
+                          avatar:
+                              const Icon(Icons.local_bar, color: Colors.amber),
+                        ),
+                        Chip(
+                          label: Text(cocktail.glassType),
+                          backgroundColor: Colors.amber.shade100,
+                          avatar:
+                              const Icon(Icons.wine_bar, color: Colors.amber),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16.0),
+
                     Row(
                       children: [
                         Row(
@@ -409,7 +627,7 @@ class CocktailDetailPage extends StatelessWidget {
                         ),
                         const SizedBox(width: 8.0),
                         Text(
-                          '${cocktail.rating}',
+                          '${cocktail.rating.toStringAsFixed(1)}',
                           style: const TextStyle(
                             fontSize: 16.0,
                             fontWeight: FontWeight.bold,
@@ -441,9 +659,11 @@ class CocktailDetailPage extends StatelessWidget {
                             const Icon(Icons.fiber_manual_record,
                                 size: 12.0, color: Colors.amber),
                             const SizedBox(width: 8.0),
-                            Text(
-                              ingredient,
-                              style: Theme.of(context).textTheme.bodyLarge,
+                            Expanded(
+                              child: Text(
+                                ingredient,
+                                style: Theme.of(context).textTheme.bodyLarge,
+                              ),
                             ),
                           ],
                         ),
@@ -475,106 +695,3 @@ class CocktailDetailPage extends StatelessWidget {
     );
   }
 }
-
-// Beispiel-Cocktails
-final List<Cocktail> sampleCocktails = [
-  Cocktail(
-    name: 'Mojito',
-    imageUrl:
-        'https://www.thecocktaildb.com/images/media/drink/metwgh1606770327.jpg',
-    description:
-        'Ein erfrischender kubanischer Cocktail mit Minze, Limette und Rum.',
-    ingredients: [
-      '60ml weißer Rum',
-      '30ml frischer Limettensaft',
-      '2 TL Zucker',
-      '6-8 Minzblätter',
-      'Sodawasser',
-      'Limettenscheiben und Minze zur Garnierung'
-    ],
-    preparation:
-        'Die Minzblätter leicht andrücken und in ein Glas geben. Limettensaft und Zucker hinzufügen und umrühren, bis der Zucker gelöst ist. Das Glas mit Eis füllen, Rum hinzufügen und mit Sodawasser auffüllen. Mit Limettenscheiben und Minze garnieren.',
-    rating: 4.8,
-  ),
-  Cocktail(
-    name: 'Margarita',
-    imageUrl:
-        'https://www.thecocktaildb.com/images/media/drink/5noda61589575158.jpg',
-    description:
-        'Ein klassischer mexikanischer Cocktail mit Tequila, Limette und Triple Sec.',
-    ingredients: [
-      '50ml Tequila',
-      '25ml Triple Sec',
-      '25ml frischer Limettensaft',
-      'Salzrand (optional)',
-      'Limettenscheibe zur Garnierung'
-    ],
-    preparation:
-        'Falls gewünscht, den Rand des Glases mit Salz versehen. Alle Zutaten mit Eis in einen Shaker geben und gut schütteln. In ein mit Eis gefülltes Glas abseihen. Mit einer Limettenscheibe garnieren.',
-    rating: 4.5,
-  ),
-  Cocktail(
-    name: 'Piña Colada',
-    imageUrl:
-        'https://www.thecocktaildb.com/images/media/drink/cpf4j51504371346.jpg',
-    description:
-        'Ein cremiger Cocktail aus Puerto Rico mit Rum, Kokosnusscreme und Ananas.',
-    ingredients: [
-      '60ml weißer Rum',
-      '90ml Ananassaft',
-      '30ml Kokosnusscreme',
-      'Ananasscheibe zur Garnierung'
-    ],
-    preparation:
-        'Alle Zutaten mit Eis in einen Mixer geben und cremig mixen. In ein Glas gießen und mit einer Ananasscheibe garnieren.',
-    rating: 4.6,
-  ),
-  Cocktail(
-    name: 'Old Fashioned',
-    imageUrl:
-        'https://www.thecocktaildb.com/images/media/drink/vrwquq1478252802.jpg',
-    description: 'Ein klassischer Whiskey-Cocktail mit Bitter und Zucker.',
-    ingredients: [
-      '60ml Bourbon oder Rye Whiskey',
-      '1 Zuckerwürfel oder 1 TL Zucker',
-      '2-3 Spritzer Angostura Bitter',
-      'Orangenschale',
-      'Maraschino-Kirsche (optional)'
-    ],
-    preparation:
-        'Den Zuckerwürfel in ein Glas geben und mit Bitter tränken. Ein paar Tropfen Wasser hinzufügen und umrühren, bis der Zucker gelöst ist. Eis ins Glas geben, Whiskey hinzufügen und umrühren. Mit Orangenschale und optional einer Kirsche garnieren.',
-    rating: 4.7,
-  ),
-  Cocktail(
-    name: 'Cosmopolitan',
-    imageUrl:
-        'https://www.thecocktaildb.com/images/media/drink/kpsajh1504368362.jpg',
-    description: 'Ein eleganter Cocktail mit Wodka, Cranberrysaft und Limette.',
-    ingredients: [
-      '45ml Zitronenwodka',
-      '15ml Triple Sec',
-      '15ml frischer Limettensaft',
-      '30ml Cranberrysaft',
-      'Limettenscheibe zur Garnierung'
-    ],
-    preparation:
-        'Alle Zutaten mit Eis in einen Shaker geben und gut schütteln. In ein Martiniglas abseihen. Mit einer Limettenscheibe garnieren.',
-    rating: 4.4,
-  ),
-  Cocktail(
-    name: 'Daiquiri',
-    imageUrl:
-        'https://www.thecocktaildb.com/images/media/drink/mrz9091589574515.jpg',
-    description:
-        'Ein einfacher, aber eleganter kubanischer Cocktail mit Rum und Limette.',
-    ingredients: [
-      '60ml weißer Rum',
-      '30ml frischer Limettensaft',
-      '2 TL Zucker',
-      'Limettenscheibe zur Garnierung'
-    ],
-    preparation:
-        'Alle Zutaten mit Eis in einen Shaker geben und gut schütteln. In ein gekühltes Cocktailglas abseihen. Mit einer Limettenscheibe garnieren.',
-    rating: 4.3,
-  ),
-];
